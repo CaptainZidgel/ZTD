@@ -21,12 +21,6 @@ function newAgent(x, y, prototype)
 	agent.color = prototype.color or {1, 1, 1}
 	agent.moveto = function(self, target, dt) --https://love2d.org/forums/viewtopic.php?t=79168
 		-- find the agent's "step" distance for this frame
-		if waypoints[self.waypoint] == nil then
-			agents[self.id] = nil
-			lives = lives - 1
-			print("Decing lives")
-			return true
-		end
 		local step = self.speed * dt
 
 		-- find the distance to target
@@ -52,29 +46,41 @@ function newAgent(x, y, prototype)
 		self.y = self.y + dy
 		return false
 	end
+	numenems = numenems + 1
 	table.insert(agents, agent)
-	agent.id = #agents
+	agent.id = numenems
+	print(agent.id)
 end
 
-protos = {												--agent prototypes
+protos = {																	--agent prototypes
 	{speed = 300, width = 50, height = 50, health = 10, color = {1, 0, 0}},	--standard, red bloon equivalent.
 	{speed = 200, width = 40, height = 40, health = 10, color = {0, 0, 1}}
 }
 
-function newTower(x, y)
+tprotos = {
+	{w = 30, h = 30, range = 1, dartproperties = {speed = 500, dmg = 60, lifetime = 1}, firespeed = 5},
+	{w = 40, h = 40, range = 2, dartproperties = {speed = 500, dmg = 60, lifetime = 1}, firespeed = 10}
+}
+
+function newTower(x, y, prototype)
 	local tower = {}
 	tower.x = x
 	tower.y = y
-	tower.w = 30
-	tower.h = 30
-	tower.range = {x = tower.x - (tower.w / 4), y = 0, w = tower.w + (tower.w / 2), h = 800}
-	tower.dartproperties = {speed = 500, dmg = 60, lifetime = 1} --dartspeed, damage done by dart, and how many attacks a dart can make before going away.
-	tower.fspeed = 5	--firing speed
+	tower.w = prototype.w
+	tower.h = prototype.h
+	tower.range = prototype.range
+	tower.dartproperties = prototype.dartproperties
+	tower.fspeed = prototype.firespeed
+	local ranges = {
+		{x = tower.x - (tower.w / 4), y = 0, w = tower.w + (tower.w / 2), h = 800},
+		{x = tower.x - 40, y = tower.y - 40, w = 120, h = 120}
+	}
+	tower.range = ranges[prototype.range]
 	tower.check = function(self)
 		if self.fspeed <= 0 then
 			self.fspeed = 50
 			for _,v in pairs(agents) do
-				if (v.x + v.w >= self.range.x and v.x <= self.range.x + self.range.w) then
+				if (v.x + v.w >= self.range.x and v.x <= self.range.x + self.range.w) and v.y + v.w >= self.range.y and v.y <= self.range.y + self.range.h then
 					self:fire(v.x, v.y)
 					break
 				end
@@ -98,7 +104,7 @@ function newTower(x, y)
 		
 		table.insert(darts, dart)
 	end
-	tower.draw = function(self)
+	tower.drawrange = function(self)
 		love.graphics.rectangle("line", self.range.x, self.range.y, self.range.w, self.range.h)
 	end
 	
@@ -107,14 +113,18 @@ end
 
 function love.mousepressed(mx, my, btn)
 	if btn == 1 then
-		button.pressSense(mx, my)
-		if my < 700 then
-			newTower(mx, my) --just a bandaid until we set up tower purchasing via gui.
+		button.pressSense(mx, my, menumode) --pass menumode to pressSense so it can evaluate if buttons can even be pressed.
+		if my < 700 and cursor ~= nil then
+			newTower(mx, my, cursor) --just a bandaid until we set up tower purchasing via gui.
+			cursor = nil
 		end
 	end
 end
 
 function love.load()
+	menumode = "purchase"
+	cursor = nil
+	numenems = 0
 	lives = 50	
 	towers = {}	--towers on screen
 	line = {}	--the line of the path
@@ -140,14 +150,19 @@ end
 
 t1, t2, t3, as, newmax = 0, 0, 0, 0, 0	--t1 is nothing, t2 is time between "clusters" of similar agents, t3 is the time between individual agent spawns. as is agents spawned.
 function love.update(dt)
-	for _,agent in pairs(agents) do
-		agent:moveto(waypoints[agent.waypoint], dt)
-		for di,d in ipairs(darts) do
-			if touching(agent, d) then
-				agents[agent.id] = nil
-				d.lifetime = d.lifetime - 1
-				if d.lifetime == 0 then
-					table.remove(darts, di)
+	for ai,agent in ipairs(agents) do
+		if waypoints[agent.waypoint] == nil then
+			table.remove(agents, ai)
+			lives = lives - 1
+		else
+			agent:moveto(waypoints[agent.waypoint], dt)
+			for di,d in ipairs(darts) do
+				if touching(agent, d) then
+					table.remove(agents, ai)
+					d.lifetime = d.lifetime - 1
+					if d.lifetime == 0 then
+						table.remove(darts, di)
+					end
 				end
 			end
 		end
@@ -170,11 +185,9 @@ function love.update(dt)
 			if t3 >= wstack[1][3] then
 				newAgent(line[1], line[2], protos[p])
 				as = as + 1
-				print("Spawned an agent type "..p.." the nth one. n:"..as)
 				t3 = 0
 				if as >= wstack[1][2] then
 					newmax = wstack[1][4]
-					print("Setting newmax to "..newmax)
 					t2 = 0
 					as = 0
 					table.remove(wstack, 1)
@@ -184,6 +197,16 @@ function love.update(dt)
 	end
 	t1 = t1 + 1
 	t2 = t2 + 1
+	if cursor ~= nil then
+		cursor.x = love.mouse.getX()
+		cursor.y = love.mouse.getY()
+	end
+end
+
+function love.keypressed(key)
+	if key == "escape" then
+		cursor = nil
+	end
 end
 
 function love.draw()
@@ -200,16 +223,19 @@ function love.draw()
 	love.graphics.setLineWidth(1)
 	for _,tower in ipairs(towers) do
 		love.graphics.rectangle("line", tower.x, tower.y, tower.w, tower.h)
-		tower:draw()
+		tower:drawrange()
 	end
 	for _,dart in ipairs(darts) do
 		--love.graphics.rectangle("fill", dart.x, dart.y, dart.w, dart.h)
 		love.graphics.circle("fill", dart.x, dart.y, dart.w)
 	end
 	for _,b in ipairs(button.buttons) do
-		b:draw()
+		b:draw(menumode)
 	end
 	love.graphics.print(tostring(lives), 750, 750)
+	if cursor ~= nil then
+		love.graphics.rectangle("line", cursor.x, cursor.y, cursor.w, cursor.h)
+	end
 end
 
 --[[====================================================================
@@ -217,16 +243,25 @@ Button construction via button.lua. Also contains callbacks those buttons rely o
 I really REALLY wanted to just leave the callback functions easily dropped in but I can't pass parameters through a function being passed as a parameter so... yikes!
 ====================================================================]]--
 function binit()
-	function prepTower(x)
-		print(x)
+	function prepTower(topro) --tower prototype
+		cursor = topro
+		cursor.x, cursor.y = 0, 0
 	end
 
-	test1 = button.new(0, 	700, 100, 100, {0, 1, 0, 0.5})
+	test1 = button.new(0, 	700, 100, 100, {0, 1, 0, 0.5}, "purchase")
 	test1.onPress = function()
-		prepTower("Hello, world!")
+		prepTower(tprotos[1])
 	end
-	test2 = button.new(700, 700, 100, 100, {1, 0, 0, 1})
+	test2 = button.new(700, 700, 100, 100, {1, 0, 0, 1}, true)
 	test2.onPress = function()
-		newAgent(line[1], line[2], protos[1])
+		if menumode then
+			menumode = false
+		else
+			menumode = "purchase"
+		end
+	end
+	test3 = button.new(100, 700, 100, 100, {0, 1, 0, 1}, "purchase")
+	test3.onPress = function()
+		prepTower(tprotos[2])
 	end
 end
