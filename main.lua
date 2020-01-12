@@ -49,7 +49,6 @@ function newAgent(x, y, prototype)
 	numenems = numenems + 1
 	table.insert(agents, agent)
 	agent.id = numenems
-	print(agent.id)
 end
 
 protos = {																	--agent prototypes
@@ -58,8 +57,8 @@ protos = {																	--agent prototypes
 }
 
 tprotos = {
-	{w = 30, h = 30, range = 1, dartproperties = {speed = 500, dmg = 60, lifetime = 1}, firespeed = 5},
-	{w = 40, h = 40, range = 2, dartproperties = {speed = 500, dmg = 60, lifetime = 1}, firespeed = 10}
+	{w = 30, h = 30, range = 1, dartproperties = {speed = 500, dmg = 60, lifetime = 1}, firespeed = 120},
+	{w = 40, h = 40, range = 2, dartproperties = {speed = 500, dmg = 60, lifetime = 1}, firespeed = 30}
 }
 
 function newTower(x, y, prototype)
@@ -71,17 +70,18 @@ function newTower(x, y, prototype)
 	tower.range = prototype.range
 	tower.dartproperties = prototype.dartproperties
 	tower.fspeed = prototype.firespeed
+	tower.tick = 0
 	local ranges = {
 		{x = tower.x - (tower.w / 4), y = 0, w = tower.w + (tower.w / 2), h = 800},
 		{x = tower.x - 40, y = tower.y - 40, w = 120, h = 120}
 	}
 	tower.range = ranges[prototype.range]
 	tower.check = function(self)
-		if self.fspeed <= 0 then
-			self.fspeed = 50
+		if self.tick <= 0 then
 			for _,v in pairs(agents) do
 				if (v.x + v.w >= self.range.x and v.x <= self.range.x + self.range.w) and v.y + v.w >= self.range.y and v.y <= self.range.y + self.range.h then
 					self:fire(v.x, v.y)
+					self.tick = self.fspeed
 					break
 				end
 			end
@@ -107,22 +107,34 @@ function newTower(x, y, prototype)
 	tower.drawrange = function(self)
 		love.graphics.rectangle("line", self.range.x, self.range.y, self.range.w, self.range.h)
 	end
+	tower.click = function(self)
+		menumode = "upgrade"
+		to_upgrade = self
+	end
 	
 	table.insert(towers, tower)
 end
 
 function love.mousepressed(mx, my, btn)
 	if btn == 1 then
-		button.pressSense(mx, my, menumode) --pass menumode to pressSense so it can evaluate if buttons can even be pressed.
-		if my < 700 and cursor ~= nil then
-			newTower(mx, my, cursor) --just a bandaid until we set up tower purchasing via gui.
-			cursor = nil
+		if cursor ~= nil then
+			if my < 700 then
+				newTower(mx, my, cursor) --just a bandaid until we set up tower purchasing via gui.
+				cursor = nil
+			end
+		else
+			button.pressSense(mx, my)
+			for i,t in ipairs(towers) do
+				if touching(t, {x = mx, y = my, w = 1, h = 1}) then
+					t:click()
+				end
+			end
 		end
 	end
 end
 
 function love.load()
-	menumode = "purchase"
+	menumode = false
 	cursor = nil
 	numenems = 0
 	lives = 50	
@@ -142,7 +154,8 @@ function love.load()
 	print(inspect(line))
 	--{A, B, C, D} --A is the agent types to spawn, B is the number of them to spawn, C is the frames between spawns, D is the frames before the next set.
 	waves = {
-		{{1, 10, 60, 120}, {2, 5, 60, 60}, {1, 3, 10, 20}, {1, 3, 10, 60}}
+		{{1, 10, 60, 120}, {2, 5, 60, 60}, {1, 3, 10, 20}, {1, 3, 10, 60}},
+		{{1, 10000, 30, 0}}
 	}
 	wstack = waves[1]
 	binit()
@@ -168,7 +181,7 @@ function love.update(dt)
 		end
 	end
 	for _,tower in pairs(towers) do
-		tower.fspeed = tower.fspeed - 1
+		tower.tick = tower.tick - 1
 		tower:check()
 	end
 	for d,dart in ipairs(darts) do
@@ -179,20 +192,24 @@ function love.update(dt)
 		end
 	end
 	if t2 >= newmax then
-		if wstack[1] ~=nil and wstack[1][1] ~= nil then
-			local p = wstack[1][1]
+		local subwave = waves[1][1]
+		if subwave ~=nil and subwave[1] ~= nil then
+			local p = subwave[1]
 			t3 = t3 + 1
-			if t3 >= wstack[1][3] then
+			if t3 >= subwave[3] then
 				newAgent(line[1], line[2], protos[p])
 				as = as + 1
 				t3 = 0
-				if as >= wstack[1][2] then
-					newmax = wstack[1][4]
+				if as >= subwave[2] then
+					newmax = subwave[4]
 					t2 = 0
 					as = 0
-					table.remove(wstack, 1)
+					table.remove(waves[1], 1)
 				end
 			end
+		else
+			--the wave has stopped spawning, the way this is set up so far, it immediately starts the next wave. Todo: Make sure wave can only be counted as "ended" once all bloons are gone, add button to start next wave.
+			table.remove(waves, 1)
 		end
 	end
 	t1 = t1 + 1
@@ -206,7 +223,14 @@ end
 function love.keypressed(key)
 	if key == "escape" then
 		cursor = nil
+		to_upgrade = nil
+		menumode = "purchase"
 	end
+end
+
+function printstats(s, x, y)
+	local str = "Fire-delay = "..s.fspeed.."frames, dartspeed = "..s.dartproperties.speed
+	love.graphics.print(str, x, y)
 end
 
 function love.draw()
@@ -214,7 +238,8 @@ function love.draw()
 	love.graphics.setLineWidth(15)
 	love.graphics.line(line)
 	love.graphics.setColor(1, 1, 1)
-	love.graphics.rectangle("fill", 0, 700, 800, 200)
+	if menumode == "upgrade" then printstats(to_upgrade, 0, 675) end
+	love.graphics.rectangle("fill", 0, 700, 800, 200)						--button shelf
 	for _,agent in pairs(agents) do
 		love.graphics.setColor(agent.color)
 		love.graphics.rectangle("fill", agent.x, agent.y, agent.w, agent.h)
@@ -222,15 +247,17 @@ function love.draw()
 	love.graphics.setColor(1, 1, 1)
 	love.graphics.setLineWidth(1)
 	for _,tower in ipairs(towers) do
+		if to_upgrade == tower then love.graphics.setColor(1, 0, 0) end
 		love.graphics.rectangle("line", tower.x, tower.y, tower.w, tower.h)
 		tower:drawrange()
+		love.graphics.setColor(1, 1, 1)
 	end
 	for _,dart in ipairs(darts) do
 		--love.graphics.rectangle("fill", dart.x, dart.y, dart.w, dart.h)
 		love.graphics.circle("fill", dart.x, dart.y, dart.w)
 	end
 	for _,b in ipairs(button.buttons) do
-		b:draw(menumode)
+		b:draw()
 	end
 	love.graphics.print(tostring(lives), 750, 750)
 	if cursor ~= nil then
@@ -248,20 +275,27 @@ function binit()
 		cursor.x, cursor.y = 0, 0
 	end
 
-	test1 = button.new(0, 	700, 100, 100, {0, 1, 0, 0.5}, "purchase")
-	test1.onPress = function()
+	t1p = button.new("1", 0, 700, 100, 100, {0, 1, 0, 0.5}, function() return menumode == "purchase" end)
+	t1p.onPress = function()
 		prepTower(tprotos[1])
 	end
-	test2 = button.new(700, 700, 100, 100, {1, 0, 0, 1}, true)
-	test2.onPress = function()
+	redb = button.new("2", 700, 700, 100, 100, {1, 0, 0, 1}, function() return true end)
+	redb.onPress = function()
+		print("PRESSED RED B")
 		if menumode then
 			menumode = false
 		else
 			menumode = "purchase"
 		end
+		print(menumode)
 	end
-	test3 = button.new(100, 700, 100, 100, {0, 1, 0, 1}, "purchase")
-	test3.onPress = function()
+	t2p = button.new("3", 100, 700, 100, 100, {0, 1, 0, 1}, function() return menumode == "purchase" end)
+	t2p.onPress = function()
 		prepTower(tprotos[2])
+	end
+	upgradeFspeed = button.new("Upgrade firing speed", 0, 700, 100, 100, {1, 1, 0, 1}, function() return menumode == "upgrade" end)
+	upgradeFspeed.onPress = function()
+		print("Reducing firespeed for highlighted tower")
+		to_upgrade.fspeed = to_upgrade.fspeed - 5
 	end
 end
