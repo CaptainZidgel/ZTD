@@ -111,6 +111,22 @@ ParentTower.click = function(self)
 	to_upgrade = self
 	print(tprotos[1].dartproperties, self.dartproperties)
 end
+ParentTower.ranges = function(self, r)
+	local rgs =	{
+	{x = self.x - (self.w / 4), y = 0, w = self.w + (self.w / 2), h = 800},
+	{x = self.x - 40, y = self.y - 40, w = 120, h = 120}
+	}
+	return rgs[r]
+end
+ParentTower.uprange = function(self)
+	local discrep = ((self.range.w * self.multiplier) - self.range.w) / 2
+	self.range = {
+		w = self.range.w * self.multiplier,
+		h = self.range.h * self.multiplier,
+		x = self.range.x - discrep,
+		y = self.range.y - discrep
+	}
+end
 
 function newTower(x, y, prototype)
 	local tower = {}
@@ -118,16 +134,11 @@ function newTower(x, y, prototype)
 	tower.y = y
 	tower.w = prototype.w
 	tower.h = prototype.h
-	tower.range = prototype.range
 	tower.dartproperties = copy(prototype.dartproperties)
 	tower.fspeed = prototype.firespeed
 	tower.tick = 0
-	local multiplier = 1
-	local ranges = {
-		{x = tower.x - (tower.w / 4), y = 0, w = tower.w + (tower.w / 2) * multiplier, h = 800},
-		{x = tower.x - 40, y = tower.y - 40, w = 120 * multiplier, h = 120 * multiplier}
-	}
-	tower.range = ranges[prototype.range]
+	tower.multiplier = 1
+	tower.range = ParentTower.ranges(tower, prototype.range)
 	
 	setmetatable(tower, ParentTower)
 	table.insert(ParentTower.towers, tower)
@@ -326,5 +337,11 @@ function binit()
 	upgradeDlifetime = button.new("+1 Hit before dart disintegrates", 200, 700, 100, 100, {1, 1, 0, 1}, function() return menumode == "upgrade" end)
 	upgradeDlifetime.onPress = function()
 		to_upgrade.dartproperties.lifetime = to_upgrade.dartproperties.lifetime + 1 
+	end
+	upgradeRange = button.new("Upgrade range", 300, 700, 100, 100, {0, 1, 1}, function() return menumode == "upgrade" end)
+	upgradeRange.onPress = function()
+		to_upgrade.multiplier = to_upgrade.multiplier + 0.1
+		to_upgrade:uprange()
+		print(inspect(to_upgrade.range))
 	end
 end
