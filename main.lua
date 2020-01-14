@@ -1,5 +1,5 @@
-local inspect = require("include.inspect")
-local button = require("button") --this isn't in include because it's my own script and I decided I wanted to upload it. Provided it works, of course.
+local inspect = require("include.inspect")		--https://github.com/kikito/inspect.lua
+local button = require("button") 				--My own script available in the github you're probably reading right now.
 
 function touching(a, b)
 	if a.x + a.w >= b.x and a.x <= b.x + b.w and a.y + a.h >= b.y and a.y <= b.y + b.h then
@@ -9,17 +9,17 @@ function touching(a, b)
 	end
 end
 
-function newAgent(x, y, prototype)
-	local agent = {}
-	agent.x = x
-	agent.y = y
-	agent.waypoint = 1
-	agent.speed = prototype.speed or 400	
-	agent.w = prototype.width or 50
-	agent.h = prototype.height or 50
-	agent.health = prototype.health or 10
-	agent.color = prototype.color or {1, 1, 1}
-	agent.moveto = function(self, target, dt) --https://love2d.org/forums/viewtopic.php?t=79168
+function copy(prototype)			--shallow copy
+	local cp = {}
+	for key, value in pairs(prototype) do
+		cp[key] = value
+	end
+	return cp
+end
+
+ParentAgent = {agents = {}}
+ParentAgent.__index = ParentAgent
+ParentAgent.moveto = function(self, target, dt) --https://love2d.org/forums/viewtopic.php?t=79168
 		-- find the agent's "step" distance for this frame
 		local step = self.speed * dt
 
@@ -45,21 +45,72 @@ function newAgent(x, y, prototype)
 		self.x = self.x + dx
 		self.y = self.y + dy
 		return false
-	end
+end
+
+function newAgent(x, y, prototype)
+	local agent = {}
+	agent.x = x
+	agent.y = y
+	agent.waypoint = 1
+	agent.speed = prototype.speed or 400	
+	agent.w = prototype.width or 50
+	agent.h = prototype.height or 50
+	agent.health = prototype.health or 10
+	agent.color = prototype.color or {1, 1, 1}
 	numenems = numenems + 1
-	table.insert(agents, agent)
+	setmetatable(agent, ParentAgent)
+	table.insert(ParentAgent.agents, agent)
 	agent.id = numenems
 end
 
 protos = {																	--agent prototypes
-	{speed = 300, width = 50, height = 50, health = 10, color = {1, 0, 0}},	--standard, red bloon equivalent.
-	{speed = 200, width = 40, height = 40, health = 10, color = {0, 0, 1}}
+	{speed = 300, width = 50, height = 50, health = 50, color = {1, 0, 0}},	--standard, red bloon equivalent.
+	{speed = 200, width = 40, height = 40, health = 60, color = {0, 0, 1}},
+	{speed = 100, width = 40, height = 40, health = 80, color = {0, 0, 1}}
 }
 
 tprotos = {
 	{w = 30, h = 30, range = 1, dartproperties = {speed = 500, dmg = 60, lifetime = 1}, firespeed = 120},
 	{w = 40, h = 40, range = 2, dartproperties = {speed = 500, dmg = 60, lifetime = 1}, firespeed = 30}
 }
+
+ParentTower = {towers = {}}
+ParentTower.__index = ParentTower
+ParentTower.fire = function(self, tx, ty)
+	local dart = {}
+	dart.x = self.x
+	dart.y = self.y
+	dart.tx, dart.ty = tx, ty --target x, y
+	dart.w = 5
+	dart.h = 10
+	dart.speed = self.dartproperties.speed
+	dart.dmg = self.dartproperties.dmg
+	dart.lifetime = self.dartproperties.lifetime
+	dart.vectors = {x = "", y = ""}
+	local distx, disty = dart.tx - self.x, dart.ty - self.y
+	local dist = math.sqrt(distx*distx + disty*disty)
+	dart.vectors.x, dart.vectors.y = distx/dist, disty/dist
+	table.insert(darts, dart)
+end
+ParentTower.check = function(self)
+	if self.tick <= 0 then
+		for _,v in pairs(agents) do
+			if (v.x + v.w >= self.range.x and v.x <= self.range.x + self.range.w) and v.y + v.w >= self.range.y and v.y <= self.range.y + self.range.h then
+				self:fire(v.x, v.y)
+				self.tick = self.fspeed
+				break
+			end
+		end
+	end
+end
+ParentTower.drawrange = function(self)
+	love.graphics.rectangle("line", self.range.x, self.range.y, self.range.w, self.range.h)
+end
+ParentTower.click = function(self)
+	menumode = "upgrade"
+	to_upgrade = self
+	print(tprotos[1].dartproperties, self.dartproperties)
+end
 
 function newTower(x, y, prototype)
 	local tower = {}
@@ -68,58 +119,25 @@ function newTower(x, y, prototype)
 	tower.w = prototype.w
 	tower.h = prototype.h
 	tower.range = prototype.range
-	tower.dartproperties = prototype.dartproperties
+	tower.dartproperties = copy(prototype.dartproperties)
 	tower.fspeed = prototype.firespeed
 	tower.tick = 0
+	local multiplier = 1
 	local ranges = {
-		{x = tower.x - (tower.w / 4), y = 0, w = tower.w + (tower.w / 2), h = 800},
-		{x = tower.x - 40, y = tower.y - 40, w = 120, h = 120}
+		{x = tower.x - (tower.w / 4), y = 0, w = tower.w + (tower.w / 2) * multiplier, h = 800},
+		{x = tower.x - 40, y = tower.y - 40, w = 120 * multiplier, h = 120 * multiplier}
 	}
 	tower.range = ranges[prototype.range]
-	tower.check = function(self)
-		if self.tick <= 0 then
-			for _,v in pairs(agents) do
-				if (v.x + v.w >= self.range.x and v.x <= self.range.x + self.range.w) and v.y + v.w >= self.range.y and v.y <= self.range.y + self.range.h then
-					self:fire(v.x, v.y)
-					self.tick = self.fspeed
-					break
-				end
-			end
-		end
-	end
-	tower.fire = function(self, tx, ty)
-		local dart = {}
-		dart.x = self.x
-		dart.y = self.y
-		dart.tx, dart.ty = tx, ty --target x, y
-		dart.w = 5
-		dart.h = 10
-		dart.speed = self.dartproperties.speed
-		dart.dmg = self.dartproperties.dmg
-		dart.lifetime = self.dartproperties.lifetime
-		dart.vectors = {x = "", y = ""}
-		local distx, disty = dart.tx - self.x, dart.ty - self.y
-		local dist = math.sqrt(distx*distx + disty*disty)
-		dart.vectors.x, dart.vectors.y = distx/dist, disty/dist
-		
-		table.insert(darts, dart)
-	end
-	tower.drawrange = function(self)
-		love.graphics.rectangle("line", self.range.x, self.range.y, self.range.w, self.range.h)
-	end
-	tower.click = function(self)
-		menumode = "upgrade"
-		to_upgrade = self
-	end
 	
-	table.insert(towers, tower)
+	setmetatable(tower, ParentTower)
+	table.insert(ParentTower.towers, tower)
 end
 
 function love.mousepressed(mx, my, btn)
 	if btn == 1 then
 		if cursor ~= nil then
 			if my < 700 then
-				newTower(mx, my, cursor) --just a bandaid until we set up tower purchasing via gui.
+				newTower(mx, my, cursor)
 				cursor = nil
 			end
 		else
@@ -136,12 +154,13 @@ end
 function love.load()
 	menumode = false
 	cursor = nil
+	to_upgrade = nil
 	numenems = 0
 	lives = 50	
-	towers = {}	--towers on screen
+	towers = ParentTower.towers	--towers on screen
 	line = {}	--the line of the path
 	waypoints = {}	--waypoints on current line
-	agents = {}	--agents on screen
+	agents = ParentAgent.agents	--agents on screen
 	darts = {}	--darts on screen
 	wstack = {} --stack of waves to actively spawn
 	math.randomseed(os.time())
@@ -155,7 +174,7 @@ function love.load()
 	--{A, B, C, D} --A is the agent types to spawn, B is the number of them to spawn, C is the frames between spawns, D is the frames before the next set.
 	waves = {
 		{{1, 10, 60, 120}, {2, 5, 60, 60}, {1, 3, 10, 20}, {1, 3, 10, 60}},
-		{{1, 10000, 30, 0}}
+		{{3, 10000, 60, 0}}
 	}
 	wstack = waves[1]
 	binit()
@@ -171,7 +190,10 @@ function love.update(dt)
 			agent:moveto(waypoints[agent.waypoint], dt)
 			for di,d in ipairs(darts) do
 				if touching(agent, d) then
-					table.remove(agents, ai)
+					agent.health = agent.health - d.dmg
+					if agent.health <= 0 then
+						table.remove(agents, ai)
+					end
 					d.lifetime = d.lifetime - 1
 					if d.lifetime == 0 then
 						table.remove(darts, di)
@@ -229,7 +251,8 @@ function love.keypressed(key)
 end
 
 function printstats(s, x, y)
-	local str = "Fire-delay = "..s.fspeed.."frames, dartspeed = "..s.dartproperties.speed
+	local dp = s.dartproperties
+	local str = "Fire-delay = "..s.fspeed.."frames, dartspeed = "..dp.speed..", dartlifetime = "..dp.lifetime
 	love.graphics.print(str, x, y)
 end
 
@@ -253,7 +276,6 @@ function love.draw()
 		love.graphics.setColor(1, 1, 1)
 	end
 	for _,dart in ipairs(darts) do
-		--love.graphics.rectangle("fill", dart.x, dart.y, dart.w, dart.h)
 		love.graphics.circle("fill", dart.x, dart.y, dart.w)
 	end
 	for _,b in ipairs(button.buttons) do
@@ -295,7 +317,14 @@ function binit()
 	end
 	upgradeFspeed = button.new("Upgrade firing speed", 0, 700, 100, 100, {1, 1, 0, 1}, function() return menumode == "upgrade" end)
 	upgradeFspeed.onPress = function()
-		print("Reducing firespeed for highlighted tower")
 		to_upgrade.fspeed = to_upgrade.fspeed - 5
+	end
+	upgradeDspeed = button.new("Upgrade dart speed", 100, 700, 100, 100, {1, 1, 0, 1}, function() return menumode == "upgrade" end)
+	upgradeDspeed.onPress = function() 
+		to_upgrade.dartproperties.speed = to_upgrade.dartproperties.speed + 50 
+	end
+	upgradeDlifetime = button.new("+1 Hit before dart disintegrates", 200, 700, 100, 100, {1, 1, 0, 1}, function() return menumode == "upgrade" end)
+	upgradeDlifetime.onPress = function()
+		to_upgrade.dartproperties.lifetime = to_upgrade.dartproperties.lifetime + 1 
 	end
 end
